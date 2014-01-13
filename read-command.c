@@ -47,6 +47,7 @@ int whitespace_char (int c);
 int precedence (enum command_type type);
 
 // processing functions
+command_node *complete_command (int (*get_next_byte) (void *), void *get_next_byte_argument, int subshell);
 void process_command (op_stack_t *operators, command_node **commands, int prec, int *command_num, int *operator_num);
 
 int line = 1;
@@ -56,7 +57,6 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 	// cs_head = first command in file
 	command_stream_t cs = init_command_stream ();
 	command_node *cn_last = cs->commands;
-	command_node *cn_current = 0;
 	
 	// internal command parsing
 	int in_comment = 0; // bool for in comment
@@ -92,13 +92,14 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 			}
 
 		} else if (c == '#') {
+			if (operator_num == command_num)
+				error (1, 0, "%i: comment cannot immediately follow an operator\n", line);
 			in_comment = 1;
 			newline = 0;
 		}
 
 		if (!in_comment) {
 			if (!valid_char(c)) {
-				// TODO: free allocated memory
 				error (1, 0, "%i: encountered unsupported character %c\n", line, c);
 			}
 
@@ -218,9 +219,10 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 								close_paren++;
 						}	
 
-						if (DEBUG) printf("%i: %s %c\n", word_count, current_word, c);
+						if (DEBUG) printf("%i: %s\t%c\n", word_count, current_word, c);
 					} while (close_paren > 0 && c != '#' && c != EOF);
-					ungetc (c, get_next_byte_argument); 
+					if (c != ')')
+						ungetc (c, get_next_byte_argument); 
 					if (close_paren > 0)
 						error (1, 0, "%i: %i unclosed parentheses\n", line, close_paren);
 					// fill out subshell_cn push onto commands stack
@@ -357,7 +359,6 @@ op_stack_t init_op_stack (enum command_type type) {
 	return o;
 }
 
-// TODO: need some state management that stack is okay to process
 void process_command (op_stack_t *operators, command_node **commands, int prec, int *command_num, int *operator_num) {
 	if (DEBUG) printf("process_command %i;\t command_num %i; operator_num %i\n", prec, *command_num, *operator_num);
 	command_node *cn_current = NULL;
@@ -366,6 +367,10 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 		if (DEBUG) printf("Processing operator %i\n", op_current->type);
 		// pop off operators and merge items from the commands stack
 		// operators should be empty, with 1 remaining command item
+		if (*command_num < 2) {
+			if (DEBUG) printf("%i: Insufficient [%i] commands available to build for operator %i\n", line, *command_num, op_current->op);
+			break;
+		}
 		if (op_current->type == SIMPLE_COMMAND) { // Redirections
 			// top command should be single word input/output (discard)
 			// next command should be the object required (leave on top of stack)
@@ -379,13 +384,11 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 			} else {
 				error (1, 0, "%i: expected redirection %c\n", line, op_current->op);
 			}
+			if (*++w) // TODO: check that there is only 1 word in cn_current
+				error (1, 0, "%i: run-on word after redirection [%s]\n", line, *w);
+
 			free (cn_current);
-			// TODO: check that there is only 1 word in cn_current
 		} else { // create bifurcated command from top of operator stack
-			if (*command_num < 2) {
-				if (DEBUG) printf("%i: Insufficient [%i] commands available to build for operator %i\n", line, *command_num, op_current->op);
-				break;
-			}
 			command_node *tree_command = init_command_node ();
 			if (!(*commands)) error (1, 0, "%i: missing arguments to bifurcated command %i\n", line, op_current->op);
 			tree_command->command->u.command[1] = (*commands)->command;
