@@ -60,20 +60,25 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 	
 	// internal command parsing
 	int in_comment = 0; // bool for in comment
+	int newline = 0; // bool for whether prior char was newline
 	command_node *commands = NULL; int command_num = 0; // command stack + counter
 	op_stack_t operators = NULL; int operator_num = 0; // operator stack + counter
 
-
-	int pc = 0; // prior character
 	int c = get_next_byte(get_next_byte_argument);
 	while (c != EOF) { // Traverse input file
 		if (c == '\n') { 
 			if (DEBUG) printf("Newline encountered\n");
+			newline = 1;
 			line++;
 			in_comment = 0; 
 
 			if (operator_num + 1 == command_num) 
 				process_command (&operators, &commands, 10, &command_num, &operator_num); // TODO: Replace 10 with something 
+			else if (operator_num == command_num) {
+				// Check that prior operator is not <>
+				if (operators && operators->type == SIMPLE_COMMAND)
+					error (1, 0, "%i: Newline after redirect %c is not permitted\n", line, operators->op);
+			}
 			// Add to queue if operators is empty and commands only has 1 item
 			if (operator_num == 0 && command_num == 1) {
 				if (!cs->commands && commands) {
@@ -88,6 +93,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 
 		} else if (c == '#') {
 			in_comment = 1;
+			newline = 0;
 		}
 
 		if (!in_comment) {
@@ -141,6 +147,11 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 						break;
 				}
 				op_stack_t current_op = init_op_stack (type);
+				if (newline && type != SUBSHELL_COMMAND) {
+					error (1, 0, "%i: encountered an unexpected token %i after a newline\n", line, type);
+				}
+				newline = 0;
+
 				if (type == SIMPLE_COMMAND) {
 					current_op->op = c;
 				}
@@ -231,6 +242,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 					error (1, 0, "%i: unexpected operator %i\n", line, type);
 			} else if (whitespace_char (c)) {
 			} else if (simple_char (c)) { 
+				newline = 0;
 				// create new text simple_command object
 				// TODO: create module for this to be reused by SUBSHELL_COMMAND
 				int word_count = 0, char_count = 0, max_word_count = 0, max_char_count = 0, max_word_size = 0;
@@ -280,7 +292,6 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 			}
 		}
 
-		pc = c;
 		c = get_next_byte (get_next_byte_argument);
 	}
 
