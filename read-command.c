@@ -57,7 +57,42 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 	// cs_head = first command in file
 	command_stream_t cs = init_command_stream ();
 	command_node *cn_last = cs->commands;
+
+	int c = get_next_byte(get_next_byte_argument);
+	while (c != EOF) { // Traverse input file
+		ungetc (c, get_next_byte_argument);
+		command_node *new_command = complete_command (get_next_byte, get_next_byte_argument, 0);
+		if (!cs->commands && new_command) {
+			cs->commands = new_command;
+			cn_last = new_command;
+		} else if (new_command && cn_last) {
+			cn_last->next = new_command;
+			cn_last = new_command;
+		}
+		c = get_next_byte(get_next_byte_argument);
+	}
 	
+	if (DEBUG) printf("State of cn_last %p\n", cn_last);
+	cn_last->next = NULL;
+
+	if (DEBUG) printf ("EOF\n");
+	return cs;
+}
+
+command_t read_command_stream (command_stream_t s)
+{
+	command_t c = NULL;
+	if (s->commands) {
+		if (DEBUG) printf("%p\n", s->commands);
+		c = s->commands->command;
+		command_node *old = s->commands;
+		s->commands = s->commands->next;
+		free (old);
+	}
+	return c;
+}
+
+command_node *complete_command (int (*get_next_byte) (void *), void *get_next_byte_argument, int subshell) {
 	// internal command parsing
 	int in_comment = 0; // bool for in comment
 	int newline = 0; // bool for whether prior char was newline
@@ -81,18 +116,11 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 			}
 			// Add to queue if operators is empty and commands only has 1 item
 			if (operator_num == 0 && command_num == 1) {
-				if (!cs->commands && commands) {
-					cs->commands = commands;
-					cn_last = commands;
-				} else if (commands && cn_last) {
-					cn_last->next = commands;
-					cn_last = commands;
-				}
-				commands = commands->next; command_num--;
+				return commands;
 			}
 
 		} else if (c == '#') {
-			if (operator_num == command_num)
+			if (operator_num == command_num && operator_num > 0)
 				error (1, 0, "%i: comment cannot immediately follow an operator\n", line);
 			in_comment = 1;
 			newline = 0;
@@ -118,7 +146,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 						else {
 							ungetc (c, get_next_byte_argument); 
 							error (1, 0, "%i: syntax error on single %c\n", line, c);
-						} // TODO: single & is a syntax error
+						} // single & is a syntax error
 						break;
 
 					case '|':
@@ -135,8 +163,21 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 						type = SUBSHELL_COMMAND;
 						break;
 
-					case ')': // will handle separately for SUBSHELL_COMMAND
-						error (1, 0, "%i: encountered unexpected subshell close %c\n", line, c);
+					case ')': 
+						if (subshell == 0)
+							error (1, 0, "%i: encountered unexpected subshell close %c\n", line, c);
+						else {
+							if (operator_num + 1 == command_num) 
+								process_command (&operators, &commands, 10, &command_num, &operator_num); // TODO: 10?
+							else {
+								error (1, 0, "%i: Incomplete command inside subshell\n", line);
+							}
+							// Add to queue if operators is empty and commands only has 1 item
+							if (operator_num == 0 && command_num == 1) {
+								return commands;
+							} else
+								error (1, 0, "%i: Incomplete command inside subshell after processing\n", line);
+						}
 						break;
 
 					case '<':
@@ -298,37 +339,11 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 	}
 
 	process_command (&operators, &commands, 10, &command_num, &operator_num);
-	if (command_num == 0 && operator_num == 0) // all whitespace? no content
-		return cs;
 
 	if (command_num != 1 || operator_num != 0)
 		error (1, 0, "%i: Incomplete command at end of file\n", line);
 
-	if (!cs->commands && commands) {
-		cs->commands = commands;
-		cn_last = commands;
-	} else if (commands && cn_last) {
-		cn_last->next = commands;
-		cn_last = commands;
-	}
-	if (DEBUG) printf("State of cn_last %p\n", cn_last);
-	cn_last->next = NULL;
-
-	if (DEBUG) printf ("EOF\n");
-	return cs;
-}
-
-command_t read_command_stream (command_stream_t s)
-{
-	command_t c = NULL;
-	if (s->commands) {
-		if (DEBUG) printf("%p\n", s->commands);
-		c = s->commands->command;
-		command_node *old = s->commands;
-		s->commands = s->commands->next;
-		free (old);
-	}
-	return c;
+	return commands;
 }
 
 command_stream_t init_command_stream () {
