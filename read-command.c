@@ -47,7 +47,7 @@ int whitespace_char (int c);
 int precedence (enum command_type type);
 
 // processing functions
-command_node *complete_command (int (*get_next_byte) (void *), void *get_next_byte_argument, int subshell);
+command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte_argument, int subshell);
 void process_command (op_stack_t *operators, command_node **commands, int prec, int *command_num, int *operator_num);
 
 int line = 1;
@@ -61,7 +61,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 	int c = get_next_byte(get_next_byte_argument);
 	while (c != EOF) { // Traverse input file
 		ungetc (c, get_next_byte_argument);
-		command_node *new_command = complete_command (get_next_byte, get_next_byte_argument, 0);
+		command_node *new_command = single_command (get_next_byte, get_next_byte_argument, 0);
 		if (!cs->commands && new_command) {
 			cs->commands = new_command;
 			cn_last = new_command;
@@ -92,7 +92,7 @@ command_t read_command_stream (command_stream_t s)
 	return c;
 }
 
-command_node *complete_command (int (*get_next_byte) (void *), void *get_next_byte_argument, int subshell) {
+command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte_argument, int subshell) {
 	// internal command parsing
 	int in_comment = 0; // bool for in comment
 	int newline = 0; // bool for whether prior char was newline
@@ -116,6 +116,8 @@ command_node *complete_command (int (*get_next_byte) (void *), void *get_next_by
 			}
 			// Add to queue if operators is empty and commands only has 1 item
 			if (operator_num == 0 && command_num == 1) {
+				if (subshell == 1)
+					error (1, 0, "%i: Expecting )\n", line);
 				return commands;
 			}
 
@@ -144,8 +146,7 @@ command_node *complete_command (int (*get_next_byte) (void *), void *get_next_by
 						if (c == '&')
 							type = AND_COMMAND;
 						else {
-							ungetc (c, get_next_byte_argument); 
-							error (1, 0, "%i: syntax error on single %c\n", line, c);
+							error (1, 0, "%i: syntax error on single &\n", line);
 						} // single & is a syntax error
 						break;
 
@@ -202,73 +203,13 @@ command_node *complete_command (int (*get_next_byte) (void *), void *get_next_by
 					// TODO: currently creates a long SIMPLE_COMMAND until finding the close paren
 					// nest in a SUBSHELL_COMMAND and push onto commands stack
 
-					// SUBSHELL specific
-					int close_paren = 1; // break when counter hits 0					
+					// SUBSHELL specific					
 					command_node *subshell_cn = init_command_node ();
 					subshell_cn->command->type = SUBSHELL_COMMAND;	
-					c = get_next_byte (get_next_byte_argument);
-					if (c == ')')
-						close_paren--;
-					else if (c == '(')
-						close_paren++;
+					command_node *child = single_command (get_next_byte, get_next_byte_argument, 1);
+					subshell_cn->command->u.subshell_command = child->command;
+					free(child);
 
-					// Create SIMPLE_COMMAND
-					int word_count = 0, char_count = 0, max_word_count = 0, max_char_count = 0, max_word_size = 0;
-					char *current_word;
-
-					command_node *simple_cn = init_command_node ();
-					simple_cn->command->type = SIMPLE_COMMAND;
-					simple_cn->command->u.word = (char **) checked_malloc (sizeof (char *) * STRMIN);
-					max_word_count = STRMIN; word_count = 0; max_word_size = sizeof (char *) * STRMIN;
-
-					// do not push simple_cn to commands stack
-
-					do {
-						// initiate new word
-						current_word = (char *) checked_malloc (sizeof (char) * STRMIN); 
-						max_char_count = STRMIN; char_count = 0;
-
-						// populate current_word
-						while (close_paren > 0 && valid_char (c) && c != '#' && c != '\n' && c != EOF) {
-							current_word[char_count] = c; 
-							char_count++;
-							if (char_count == max_char_count) { // expand current_word if necessary
-								current_word = checked_grow_alloc (current_word, (size_t *) &max_char_count);
-							}	
-							c = get_next_byte (get_next_byte_argument);
-							if (c == ')')
-								close_paren--;
-							else if (c == '(')
-								close_paren++;
-						}
-						current_word[char_count] = 0; // NULL terminate current_word
-
-						// append current_word to u.word
-						simple_cn->command->u.word[word_count] = current_word; 
-						word_count++;
-						if (word_count == max_word_count) { // expand command->u.word
-							simple_cn->command->u.word = (char **) checked_grow_alloc (simple_cn->command->u.word, (size_t *) &max_word_size);
-						}
-						simple_cn->command->u.word[word_count] = 0; // NULL terminate u.word
-
-						// eat whitespace to next word
-						while (whitespace_char (c) || c == '\n') {
-							c = get_next_byte (get_next_byte_argument);
-							if (c == ')')
-								close_paren--;
-							else if (c == '(')
-								close_paren++;
-						}	
-
-						if (DEBUG) printf("%i: %s\t%c\n", word_count, current_word, c);
-					} while (close_paren > 0 && c != '#' && c != EOF);
-					if (c != ')')
-						ungetc (c, get_next_byte_argument); 
-					if (close_paren > 0)
-						error (1, 0, "%i: %i unclosed parentheses\n", line, close_paren);
-					// fill out subshell_cn push onto commands stack
-					subshell_cn->command->u.subshell_command = simple_cn->command;
-					free(simple_cn);
 					subshell_cn->next = commands; command_num++;
 					commands = subshell_cn;
 				} else if (!operators || (precedence (type) < precedence (operators->type))) {
@@ -342,6 +283,8 @@ command_node *complete_command (int (*get_next_byte) (void *), void *get_next_by
 
 	if (command_num != 1 || operator_num != 0)
 		error (1, 0, "%i: Incomplete command at end of file\n", line);
+	else if (subshell == 1)
+		error (1, 0, "%i: Expecting )\n", line);
 
 	return commands;
 }
