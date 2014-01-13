@@ -69,6 +69,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
 			cn_last->next = new_command;
 			cn_last = new_command;
 		}
+        if (DEBUG) printf("New separate command added\n");
 		c = get_next_byte(get_next_byte_argument);
 	}
 	
@@ -101,13 +102,14 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 
 	int c = get_next_byte(get_next_byte_argument);
 	while (c != EOF) { // Traverse input file
+        if (DEBUG) printf("Current state: %i commands, %i operators\n", command_num, operator_num);
 		if (c == '\n') { 
 			if (DEBUG) printf("Newline encountered\n");
 			newline = 1;
 			line++;
 			in_comment = 0; 
 
-			if (operator_num + 1 == command_num) 
+			if ((operator_num + 1) == command_num)
 				process_command (&operators, &commands, 10, &command_num, &operator_num); // TODO: Replace 10 with something 
 			else if (operator_num == command_num) {
 				// Check that prior operator is not <>
@@ -134,7 +136,7 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 			}
 
 			if (operator_char (c)) {
-				if (DEBUG) printf("Operator %c\n", c);
+				if (DEBUG) printf("Operator %c\t current count %i\n", c, operator_num);
 				enum command_type type;
 				switch (c) {
 					case ';':
@@ -214,9 +216,11 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 					commands = subshell_cn;
 				} else if (!operators || (precedence (type) < precedence (operators->type))) {
 					// push onto operators stack
+                    if (DEBUG) printf("High precedence operator encountered\t %i commands %i operators\n", command_num, operator_num);
 					current_op->next = operators; operator_num++;
 					operators = current_op;
 				} else {
+                    if (DEBUG) printf("Lower or equal precedence operator encountered\t %i commands %i operators\n", command_num, operator_num);
 					process_command (&operators, &commands, precedence (type), &command_num, &operator_num);
 					// push onto operators stack
 					current_op->next = operators; operator_num++;
@@ -225,7 +229,8 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 				if (operator_num > command_num)
 					error (1, 0, "%i: unexpected operator %i\n", line, type);
 			} else if (whitespace_char (c)) {
-			} else if (simple_char (c)) { 
+			} else if (simple_char (c)) {
+                if (DEBUG) printf("simple_char \t %i commands, %i operators\n", command_num, operator_num);
 				newline = 0;
 				// create new text simple_command object
 				// TODO: create module for this to be reused by SUBSHELL_COMMAND
@@ -242,26 +247,35 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 				commands = simple_cn;
 
 				do {
+                    if (DEBUG) printf("New word initiation \t %i commands, %i operators\n", command_num, operator_num);
 					// initiate new word
 					current_word = (char *) checked_malloc (sizeof (char) * STRMIN); 
 					max_char_count = STRMIN; char_count = 0;
 
+                    if (DEBUG) printf("Populating word... \t %i commands, %i operators\n", command_num, operator_num);
+                    
 					// populate current_word
 					do {
 						current_word[char_count] = c; 
 						char_count++;
 						if (char_count == max_char_count) { // expand current_word if necessary
+                            if (DEBUG) printf("Calling checked_grow_alloc %s@%p, chars %i \t %i commands, %i operators@%p\n", current_word, current_word, max_char_count, command_num, operator_num, &operator_num);
 							current_word = checked_grow_alloc (current_word, (size_t *) &max_char_count);
+                            if (DEBUG) printf("Called checked_grow_alloc %s, chars %i \t %i commands, %i operators\n", current_word, max_char_count, command_num, operator_num);
 						}
 						c = get_next_byte (get_next_byte_argument);
 					} while (simple_char (c));
 					current_word[char_count] = 0; // NULL terminate current_word
 
+                    if (DEBUG) printf("Word populated %s \t %i commands, %i operators\n", current_word, command_num, operator_num);
+                    
 					// append current_word to u.word
 					commands->command->u.word[word_count] = current_word; 
 					word_count++;
 					if (word_count == max_word_count) { // expand command->u.word
+                        if (DEBUG) printf("Calling checked_grow_alloc words %i \t %i commands, %i operators\n", max_word_count, command_num, operator_num);
 						commands->command->u.word = (char **) checked_grow_alloc (commands->command->u.word, (size_t *) &max_word_size);
+                        if (DEBUG) printf("Called checked_grow_alloc words %i \t %i commands, %i operators\n", max_word_count, command_num, operator_num);
 					}
 					commands->command->u.word[word_count] = 0; // NULL terminate u.word
 
@@ -270,7 +284,7 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 						c = get_next_byte (get_next_byte_argument);
 					}	
 
-					if (DEBUG) printf("%i: %s\n", word_count, current_word);
+					if (DEBUG) printf("%i: %s \t%i c,%i op\n", word_count, current_word, command_num, operator_num);
 				} while (simple_char (c));
 				ungetc (c, get_next_byte_argument); 
 			}
@@ -322,7 +336,7 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 	command_node *cn_current = NULL;
 	op_stack_t op_current = *operators;
 	while (*operator_num > 0 && (prec >= (precedence(op_current->type)))) {
-		if (DEBUG) printf("Processing operator %i\n", op_current->type);
+		if (DEBUG) printf("Processing operator %i with %i on command stack\n", op_current->type, *command_num);
 		// pop off operators and merge items from the commands stack
 		// operators should be empty, with 1 remaining command item
 		if (*command_num < 2) {
@@ -333,8 +347,10 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 			// top command should be single word input/output (discard)
 			// next command should be the object required (leave on top of stack)
 			cn_current = *commands;
+            
 			*commands = cn_current->next; (*command_num)--;
 			char **w = cn_current->command->u.word;
+                              
 			if (op_current->op == '>') {
 				(*commands)->command->output = *w;
 			} else if (op_current->op == '<') {
@@ -342,9 +358,11 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 			} else {
 				error (1, 0, "%i: expected redirection %c\n", line, op_current->op);
 			}
-			if (*++w) // TODO: check that there is only 1 word in cn_current
+            if (DEBUG) printf("Used word %s\n", *w);
+            free(w);
+			if (*++w) // Check that there is only 1 word in cn_current
 				error (1, 0, "%i: run-on word after redirection [%s]\n", line, *w);
-
+            
 			free (cn_current);
 		} else { // create bifurcated command from top of operator stack
 			command_node *tree_command = init_command_node ();
@@ -363,6 +381,8 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 		*operators = (*operators)->next; (*operator_num)--;
 		free (op_current);
 		op_current = *operators;
+        if (DEBUG) printf("Operators left: %i\n", *operator_num);
+        if (DEBUG) printf("Next operator: %p\n", op_current);
 	}
 	if (DEBUG) printf("command_num %i; operator_num %i\n", *command_num, *operator_num);
 }
