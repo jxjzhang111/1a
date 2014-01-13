@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #define DEBUG 0
-#define STRMIN 8
+#define STRMIN 16
 
 
 // typedefs
@@ -359,10 +359,8 @@ void process_command (op_stack_t *operators, command_node **commands, int prec, 
 				error (1, 0, "%i: expected redirection %c\n", line, op_current->op);
 			}
             if (DEBUG) printf("Used word %s\n", *w);
-            free(w);
 			if (*++w) // Check that there is only 1 word in cn_current
 				error (1, 0, "%i: run-on word after redirection [%s]\n", line, *w);
-            
 			free (cn_current);
 		} else { // create bifurcated command from top of operator stack
 			command_node *tree_command = init_command_node ();
