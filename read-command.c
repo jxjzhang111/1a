@@ -352,7 +352,13 @@ command_node *parse_command (token_stream **ts, int subshell) {
     }
     // process stacks
 	process_command (&operators, &commands, 10, &command_num, &operator_num);
-    
+
+    // if last operator is a semi-colon, ignore
+    if (operator_num == 1 && operators->type == SEQUENCE_COMMAND) {
+        operator_num--;
+        free (operators);
+    }
+
 	if (command_num != 1 || operator_num != 0)
 		error (1, 0, "%i: Incomplete command at end of file\n", line);
 	else if (subshell == 1)
