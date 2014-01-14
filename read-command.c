@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #define DEBUG 0
-#define STRMIN 16
+#define STRMIN 8
 
 
 // typedefs
@@ -98,7 +98,7 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 	int in_comment = 0; // bool for in comment
 	int newline = 0; // bool for whether prior char was newline
 	command_node *commands = NULL; int command_num = 0; // command stack + counter
-	op_stack_t operators = NULL; int operator_num = 0; // operator stack + counter
+	op_stack_t operators = NULL; int dummy = 0; int operator_num = 0; // operator stack + counter
 
 	int c = get_next_byte(get_next_byte_argument);
 	while (c != EOF) { // Traverse input file
@@ -234,13 +234,13 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 				newline = 0;
 				// create new text simple_command object
 				// TODO: create module for this to be reused by SUBSHELL_COMMAND
-				int word_count = 0, char_count = 0, max_word_count = 0, max_char_count = 0, max_word_size = 0;
+				int word_count = 0, char_count = 0, max_word_count = 0, max_char_count = 0;
 				char *current_word;
 
 				command_node *simple_cn = init_command_node ();
 				simple_cn->command->type = SIMPLE_COMMAND;
 				simple_cn->command->u.word = (char **) checked_malloc (sizeof (char *) * STRMIN);
-				max_word_count = STRMIN; word_count = 0; max_word_size = sizeof (char *) * STRMIN;
+				max_word_count = STRMIN; word_count = 0;
 
 				// push to commands stack
 				simple_cn->next = commands; command_num++;
@@ -250,7 +250,7 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
                     if (DEBUG) printf("New word initiation \t %i commands, %i operators\n", command_num, operator_num);
 					// initiate new word
 					current_word = (char *) checked_malloc (sizeof (char) * STRMIN); 
-					max_char_count = STRMIN; char_count = 0;
+					max_char_count = sizeof (char) * STRMIN; char_count = 0;
 
                     if (DEBUG) printf("Populating word... \t %i commands, %i operators\n", command_num, operator_num);
                     
@@ -260,7 +260,9 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 						char_count++;
 						if (char_count == max_char_count) { // expand current_word if necessary
                             if (DEBUG) printf("Calling checked_grow_alloc %s@%p, chars %i \t %i commands, %i operators@%p\n", current_word, current_word, max_char_count, command_num, operator_num, &operator_num);
-							current_word = checked_grow_alloc (current_word, (size_t *) &max_char_count);
+                            size_t alloc_char_count = (size_t) max_char_count;
+							current_word = checked_grow_alloc (current_word, &alloc_char_count);
+                            max_char_count = (int) alloc_char_count;
                             if (DEBUG) printf("Called checked_grow_alloc %s, chars %i \t %i commands, %i operators\n", current_word, max_char_count, command_num, operator_num);
 						}
 						c = get_next_byte (get_next_byte_argument);
@@ -274,7 +276,9 @@ command_node *single_command (int (*get_next_byte) (void *), void *get_next_byte
 					word_count++;
 					if (word_count == max_word_count) { // expand command->u.word
                         if (DEBUG) printf("Calling checked_grow_alloc words %i \t %i commands, %i operators\n", max_word_count, command_num, operator_num);
-						commands->command->u.word = (char **) checked_grow_alloc (commands->command->u.word, (size_t *) &max_word_size);
+                        size_t alloc_words_size = (size_t) (sizeof (char *) * max_word_count);
+						commands->command->u.word = (char **) checked_grow_alloc (commands->command->u.word, (size_t *) &alloc_words_size);
+                        max_word_count = alloc_words_size / (sizeof (char *));
                         if (DEBUG) printf("Called checked_grow_alloc words %i \t %i commands, %i operators\n", max_word_count, command_num, operator_num);
 					}
 					commands->command->u.word[word_count] = 0; // NULL terminate u.word
