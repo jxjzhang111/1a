@@ -61,4 +61,4 @@ done
 exit $status
 ) || exit
 
-#rm -fr "$tmp"
+rm -fr "$tmp"
