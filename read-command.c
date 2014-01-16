@@ -230,6 +230,13 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             c = get_next_byte(get_next_byte_argument);
         next = 1;
     }
+    if (last_t && last_t->type == SEQUENCE_COMMAND) {
+        // pop off last operator if it's a semicolon
+        token *temp = last_t;
+        last_t = last_t->prev;
+        last_t->next = NULL;
+        free (temp);
+    }
     
     // command parsing
     token_stream *ts = root_ts;
@@ -375,12 +382,6 @@ command_node *parse_command (token_stream **ts, int subshell) {
     }
     // process stacks
 	process_command (&operators, &commands, 10, &command_num, &operator_num);
-
-    // if last operator is a semi-colon, ignore
-    if (operator_num == 1 && operators->type == SEQUENCE_COMMAND) {
-        operator_num--;
-        free (operators);
-    }
 
 	if (command_num != 1 || operator_num != 0)
 		error (1, 0, "%i: Incomplete command at end of file\n", line);
