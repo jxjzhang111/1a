@@ -27,6 +27,7 @@ typedef struct token {
     char *word; // only populated for command_type = SIMPLE
     int line;
     struct token *next;
+    struct token *prev;
 } token;
 
 // 1 token_stream per complete command
@@ -67,7 +68,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
     
     // token stream parsing
     int c = get_next_byte(get_next_byte_argument);
-    int next = 1, in_comment = 0;
+    int next = 1, in_comment = 0, paren = 0;
     token_stream *root_ts = NULL;
     token_stream *last_ts = root_ts;
     token_stream *current_ts = last_ts;
@@ -79,6 +80,8 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             if (!in_comment)
                 error (1, 0, "%i: encountered unsupported character %c\n", line, c);
         } else if (!current_ts) {
+            if (DEBUG) printf("%i: New command\n", line);
+            paren = 0;
             current_ts = (token_stream *) checked_malloc (sizeof (token_stream));
             current_ts->item = NULL;
             current_ts->next = NULL;
@@ -91,6 +94,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             last_t = NULL;
         }
         token *t = (token *) checked_malloc (sizeof (token));
+        t->next = NULL; t->prev = NULL;
         t->line = line;
         
         if (c == '\n') {
@@ -98,9 +102,20 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             line++;
             in_comment = 0; // exit comment mode
             
-            if (last_t && !last_t->is_operator)
+            if (last_t && paren == 0
+                && (!last_t->is_operator
+                    || last_t->type == SEQUENCE_COMMAND
+                    || !strcmp(last_t->word, ")"))) {
+                // TODO: does a command end with a semicolon?
+                if (last_t->type == SEQUENCE_COMMAND) {
+                    // pop off last operator if it's a semicolon
+                    token *temp = last_t;
+                    last_t = last_t->prev;
+                    last_t->next = NULL;
+                    free (temp);
+                }
                 current_ts = NULL;
-            else if (last_t && last_t->is_operator && last_t->type == SIMPLE_COMMAND)
+            } else if (last_t && last_t->is_operator && last_t->type == SIMPLE_COMMAND)
                 error (1, 0, "%i: Newline after redirect %s is not permitted\n", t->line, last_t->word);
         } else if (in_comment || whitespace_char (c)) {
             // do nothing
@@ -126,10 +141,12 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             if (DEBUG) printf("Parsed word %s with max word length %i\n", word, (int) max_word_size);
             
             // push token to current_ts
-            if (last_t)
+            if (last_t) {
                 last_t->next = t;
-            else
+                t->prev = last_t;
+            } else {
                 current_ts->item = t;
+            }
             last_t = t;
             
         } else if (operator_char (c)) {
@@ -165,10 +182,19 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
                     break;
                 case '(':
                     type = SUBSHELL_COMMAND;
+                    paren++;
                     break;
                     
                 case ')':
                     type = SUBSHELL_COMMAND;
+                    paren--;
+                    if (last_t && last_t->type == SEQUENCE_COMMAND) {
+                        // pop off last operator if it's a semicolon
+                        token *temp = last_t;
+                        last_t = last_t->prev;
+                        last_t->next = NULL;
+                        free (temp);
+                    }
                     break;
                     
                 case '<':
@@ -185,9 +211,10 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             t->is_operator = 1;
             
             // push token to current_ts
-            if (last_t)
+            if (last_t) {
                 last_t->next = t;
-            else {
+                t->prev = last_t;
+            } else {
                 if (type != SUBSHELL_COMMAND)
                     error (1, 0, "%i: First item in command cannot be %s\n", t->line, word);
                 current_ts->item = t;
@@ -207,7 +234,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
     // command parsing
     token_stream *ts = root_ts;
     int i = 1;
-    while (ts) {
+    while (ts && ts->item) {
         if (DEBUG) printf("%i: \n", i);
         
 		command_node *new_command = parse_command (&ts, 0);
@@ -258,10 +285,6 @@ command_node *parse_command (token_stream **ts, int subshell) {
             
             // process stacks if precedence is lower/equal than top of stack
             if (t->type == SUBSHELL_COMMAND) { // special case for SUBSHELL_COMMAND
-                // TODO: currently creates a long SIMPLE_COMMAND until finding the close paren
-                // nest in a SUBSHELL_COMMAND and push onto commands stack
-                
-                // SUBSHELL specific
                 if (DEBUG) printf ("Processing subshell command %s\n", t->word);
                 if (!strcmp(t->word, "(")) {
                     command_node *subshell_cn = init_command_node ();
@@ -289,7 +312,7 @@ command_node *parse_command (token_stream **ts, int subshell) {
                         if (operator_num + 1 == command_num)
                             process_command (&operators, &commands, 10, &command_num, &operator_num); // TODO: 10?
                         else {
-                            error (1, 0, "%i: Incomplete command inside subshell\n", t->line);
+                            error (1, 0, "%i: Incomplete command inside subshell\t %i operators, %i commands\n", t->line, operator_num, command_num);
                         }
                         // Add to queue if operators is empty and commands only has 1 item
                         if (operator_num == 0 && command_num == 1) {
@@ -407,22 +430,28 @@ void process_command (token **operators, command_node **commands, int prec, int 
 			char **w = cn_current->command->u.word;
                               
 			if (!strcmp(op_current->word,">")) {
+                if ((*commands)->command->output) // TODO: Check? works in bash
+                    error (1, 0, "%i: multiple output redirects in a row\n", op_current->line);
 				(*commands)->command->output = *w;
 			} else if (!strcmp(op_current->word,"<")) {
+                if ((*commands)->command->output) // TODO: Check? works in bash
+                    error (1, 0, "%i: input redirect cannot immediately follow output redirect\n", op_current->line);
+                if ((*commands)->command->input) // TODO: Check? works in bash
+                    error (1, 0, "%i: multiple input redirects in a row\n", op_current->line);
 				(*commands)->command->input = *w;
 			} else {
-				error (1, 0, "%i: expected redirection %s\n", line, op_current->word);
+				error (1, 0, "%i: expected redirection %s\n", op_current->line, op_current->word);
 			}
             if (DEBUG) printf("Used word %s\n", *w);
 			if (*++w) // Check that there is only 1 word in cn_current
-				error (1, 0, "%i: run-on word after redirection [%s]\n", line, *w);
+				error (1, 0, "%i: run-on word after redirection [%s]\n", op_current->line, *w);
 			free (cn_current);
 		} else { // create bifurcated command from top of operator stack
 			command_node *tree_command = init_command_node ();
-			if (!(*commands)) error (1, 0, "%i: missing arguments to bifurcated command %s\n", line, op_current->word);
+			if (!(*commands)) error (1, 0, "%i: missing arguments to bifurcated command %s\n", op_current->line, op_current->word);
 			tree_command->command->u.command[1] = (*commands)->command;
 			*commands = (*commands)->next; (*command_num)--;
-			if (!(*commands)) error (1, 0, "%i: missing argument to bifurcated command %s\n", line, op_current->word);
+			if (!(*commands)) error (1, 0, "%i: missing argument to bifurcated command %s\n", op_current->line, op_current->word);
 			tree_command->command->u.command[0] = (*commands)->command;
 			*commands = (*commands)->next; (*command_num)--;
 			tree_command->command->type = op_current->type;
