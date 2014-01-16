@@ -26,7 +26,10 @@ for bad in \
   'a < 
       c' \
   'cat (a;  ) && y' \
-  'z a>b<c'
+  'a;;' \
+  '(a && );' \
+  '(( a && b
+  )' 
 do
   echo "$bad" >test$n.sh || exit
   ../timetrash -p test$n.sh >test$n.out 2>test$n.err && {

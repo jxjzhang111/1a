@@ -109,6 +109,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
                 // TODO: does a command end with a semicolon?
                 if (last_t->type == SEQUENCE_COMMAND) {
                     // pop off last operator if it's a semicolon
+                    if (DEBUG) printf("%i: Popping off semicolon prior to end of command\n", t->line);
                     token *temp = last_t;
                     last_t = last_t->prev;
                     last_t->next = NULL;
@@ -190,6 +191,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
                     paren--;
                     if (last_t && last_t->type == SEQUENCE_COMMAND) {
                         // pop off last operator if it's a semicolon
+                        if (DEBUG) printf("%i: Popping off semicolon prior to )\n", t->line);
                         token *temp = last_t;
                         last_t = last_t->prev;
                         last_t->next = NULL;
@@ -214,6 +216,8 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             if (last_t) {
                 last_t->next = t;
                 t->prev = last_t;
+                if (last_t->is_operator && t->type != SUBSHELL_COMMAND && last_t->type != SUBSHELL_COMMAND)
+                    error (1, 0, "%i: Consecutive operators %s %s\n", t->line, last_t->word, word);
             } else {
                 if (type != SUBSHELL_COMMAND)
                     error (1, 0, "%i: First item in command cannot be %s\n", t->line, word);
@@ -232,6 +236,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
     }
     if (last_t && last_t->type == SEQUENCE_COMMAND) {
         // pop off last operator if it's a semicolon
+        if (DEBUG) printf("%i: Popping off semicolon prior to EOF\n", last_t->line);
         token *temp = last_t;
         last_t = last_t->prev;
         last_t->next = NULL;
@@ -431,14 +436,23 @@ void process_command (token **operators, command_node **commands, int prec, int 
 			char **w = cn_current->command->u.word;
                               
 			if (!strcmp(op_current->word,">")) {
-                if ((*commands)->command->output) // TODO: Check? works in bash
-                    error (1, 0, "%i: multiple output redirects in a row\n", op_current->line);
+                if ((*commands)->command->output) {// TODO: Check? works in bash
+                    char *temp = (*commands)->command->output;
+                    if (DEBUG) printf("%i: Disposing of prior input %s\n", op_current->line, temp);
+                    free (temp);
+                    // error (1, 0, "%i: multiple output redirects in a row\n", op_current->line);
+                }
 				(*commands)->command->output = *w;
 			} else if (!strcmp(op_current->word,"<")) {
-                if ((*commands)->command->output) // TODO: Check? works in bash
+                /*if ((*commands)->command->output) {
                     error (1, 0, "%i: input redirect cannot immediately follow output redirect\n", op_current->line);
-                if ((*commands)->command->input) // TODO: Check? works in bash
-                    error (1, 0, "%i: multiple input redirects in a row\n", op_current->line);
+                }*/
+                if ((*commands)->command->input) {
+                    char *temp = (*commands)->command->input;
+                    if (DEBUG) printf("%i: Disposing of prior input %s\n", op_current->line, temp);
+                    free (temp);
+                    // error (1, 0, "%i: multiple input redirects in a row\n", op_current->line);
+                }
 				(*commands)->command->input = *w;
 			} else {
 				error (1, 0, "%i: expected redirection %s\n", op_current->line, op_current->word);
