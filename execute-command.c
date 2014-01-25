@@ -1,25 +1,1 @@
-// UCLA CS 111 Lab 1 command execution
-
-#include "command.h"
-#include "command-internals.h"
-
-#include <error.h>
-
-/* FIXME: You may need to add #include directives, macro definitions,
-   static function definitions, etc.  */
-
-int
-command_status (command_t c)
-{
-  return c->status;
-}
-
-void
-execute_command (command_t c, int time_travel)
-{
-  /* FIXME: Replace this with your implementation.  You may need to
-     add auxiliary functions and otherwise modify the source code.
-     You can also use external functions defined in the GNU C Library.  */
-	c; time_travel;
-  error (1, 0, "command execution not yet implemented");
-}
+// UCLA CS 111 Lab 1 command execution#include "command.h"#include "command-internals.h"#include <error.h>#include <unistd.h>#include <stdlib.h>#include <string.h>#include <sys/wait.h>#include <sys/stat.h>#include <fcntl.h>intcommand_status (command_t c){  return c->status;}voidexecute_command (command_t cmd, int time_travel){  pid_t child;  int status;  int fd[2];  int fd_in, fd_out;    switch (cmd->type) {    case SIMPLE_COMMAND:      child = fork ();      if (child == 0) { // in child        // handle redirects        if (cmd->input) {          if ((fd_in = open(cmd->input, O_RDONLY, 0666)) == -1)            error(1, 0, "failure to open input file %s", cmd->input);           if (dup2(fd_in, STDIN_FILENO) == -1)            error(1, 0, "failure of input redirect");         }        if (cmd->output) {          if ((fd_out = open(cmd->input, O_WRONLY|O_CREAT|O_TRUNC, 0666)) == -1)            error(1, 0, "failure to open output file %s", cmd->output);          if (dup2(fd_out , STDOUT_FILENO) == -1)            error(1, 0, "failure of output redirect");         }        // execution        if(strcmp(cmd->u.word[0], "exec") == 0) // skip the exec if it's the first word          execvp(cmd->u.word[1], cmd->u.word + 1);        else          execvp(cmd->u.word[0], cmd->u.word);        error(1, 0, "execute command failed!");      } else if (child > 0) { // in parent        waitpid(child , &status , 0); // wait for child to finish        cmd->status = status;      } else        error(1, 0, "failed to create child process!");             break;        // run left recursively, then run right if applicable    case AND_COMMAND:       execute_command(cmd->u.command[0], time_travel);       if (cmd->u.command[0]->status == 0){        execute_command(cmd->u.command[1], time_travel);        cmd->status = cmd->u.command[1]->status;       } else         cmd->status = cmd->u.command[0]->status;             break;    // run left recursively, then run right if applicable    case OR_COMMAND:      execute_command(cmd->u.command[0], time_travel);       if (cmd->u.command[0]->status != 0){        execute_command(cmd->u.command[1], time_travel);        cmd->status = cmd->u.command[1]->status;       } else         cmd->status = cmd->u.command[0]->status;             break;    // child | parent redirect output of parent to input of child    case PIPE_COMMAND:            if (pipe(fd) == -1)        error(1, 0, "Cannot create pipe!");       child = fork ();      if (child == 0) { // child writes to pipe        close(fd[0]);        if (dup2(fd[1], STDOUT_FILENO) == -1)          error(1, 0, "Cannot dup2 STDOUT from fd[1]!");         execute_command(cmd->u.command[0], time_travel);         close(fd[1]);        exit(cmd->u.command[0]->status);      } else if (child > 0) { // parent reads from pipe           waitpid(child , &status , 0);           cmd->u.command[0]->status = status;           close(fd[1]);          if (dup2(fd[0], STDIN_FILENO) == -1)            error(1, 0, "Cannot dup2 STDIN from fd[0]!");          execute_command(cmd->u.command[1], time_travel);           close(fd[0]);          cmd->status = cmd->u.command[1]->status;      } else         error(1, 0, "fail to create child process");          case SEQUENCE_COMMAND:      execute_command(cmd->u.command[0], time_travel);      execute_command(cmd->u.command[1], time_travel);      cmd->status = cmd->u.command[1]->status;      break;    case SUBSHELL_COMMAND:      execute_command(cmd->u.subshell_command, time_travel);      cmd->status = cmd->u.subshell_command->status;      break;  }}
