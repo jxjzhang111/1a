@@ -106,7 +106,6 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
                 && (!last_t->is_operator
                     || last_t->type == SEQUENCE_COMMAND
                     || !strcmp(last_t->word, ")"))) {
-                // TODO: does a command end with a semicolon?
                 if (last_t->type == SEQUENCE_COMMAND) {
                     // pop off last operator if it's a semicolon
                     if (DEBUG) printf("%i: Popping off semicolon prior to end of command\n", t->line);
