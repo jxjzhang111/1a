@@ -42,14 +42,15 @@ typedef struct graph_node {
     int max_edge_count;
     int edge_count;
     int in_edges;
-    char executing;
 } graph_node;
 
 typedef struct graph_nodes {
     graph_node *node;
     struct graph_nodes *next;
+    struct graph_nodes *prev;
 } graph_nodes;
 
+// TODO: split up disconnected graphs and run independently
 typedef struct graph_list {
     graph_nodes *graph;
     struct graph_list *next;
@@ -69,6 +70,7 @@ int intersect (char **words1, char **words2);
 void add_edge (graph_node *src, graph_node *dst);
 command_t execute_parallel (graph_nodes *node_list, int time_travel);
 void decrement (graph_node *node);
+graph_nodes *append_command (graph_nodes *last_node, command_t command, int *command_number);
 
 int
 main (int argc, char **argv)
@@ -117,21 +119,12 @@ main (int argc, char **argv)
         if (DEBUG) printf("Commencing time travel\n");
         graph_nodes *node_list = (graph_nodes *) checked_malloc (sizeof (graph_nodes));
         graph_nodes *last_node = node_list;
+        node_list->prev = NULL;
         node_list->node = NULL;
         
         // Parse out input/outputs; create list of graph_nodes (node_list)
         while ((command = read_command_stream (command_stream))) {
-            if (DEBUG) {
-                printf ("# %d\n", command_number);
-                print_command (command);
-            }
-            graph_node *n = parse_io (command, command_number++);
-            if (last_node->node) {
-                last_node->next = (graph_nodes *) checked_malloc (sizeof (graph_nodes));
-                last_node = last_node->next;
-            }
-            last_node->node = n;
-            last_node->next = NULL;
+            last_node = append_command (last_node, command, &command_number);
         }
         
         // Fill out dependency edges in node_list
@@ -148,6 +141,8 @@ main (int argc, char **argv)
             prev_node = node_list;
             last_node = last_node->next;
         }
+        
+        // TODO: split up disconnected graphs and run separately
         
         // Execute the graph_nodes
         last_command = execute_parallel (node_list, time_travel);
@@ -167,7 +162,6 @@ graph_node *parse_io (command_t command, int command_number) {
     node->max_edge_count = 0;
     node->edge_count = 0;
     node->out_edges = NULL;
-    node->executing = 0;
 
     if (DEBUG) {
         printf ("\n\toutputs: ");
@@ -266,7 +260,6 @@ char **extract_io (command_t command, char io) {
 // Returns 1 if words1 and words2 intersect
 int intersect (char **words1, char **words2) {
     while (*words1) {
-        if (DEBUG) printf ("\tIntersect: %s\n", *words1);
         if (contains (*words1, words2)) {
             return 1;
         }
@@ -278,7 +271,6 @@ int intersect (char **words1, char **words2) {
 // Returns 1 if words contains w
 int contains (char *w, char **words) {
     while (*words) {
-        if (DEBUG) printf ("\t\tContains: %s %s\n", w, *words);
         if (!strcmp (w, *words)) {
             return 1;
         }
@@ -316,11 +308,11 @@ command_t execute_parallel (graph_nodes *node_list, int time_travel) {
     // Execute each graph separately (fork)
     // Grandparent: wait for all graphs to complete
     
-    while (node_list) {
+    while (node_list || children) {
         // Parent: find nodes with no incoming edges and run separately (fork)
         while (current_node) {
-            if (DEBUG) printf ("Pre-execution: %i (%i:%i)\n", current_node->node->seq_no, current_node->node->in_edges, current_node->node->executing);
-            if (current_node->node->in_edges == 0 && !current_node->node->executing) {
+            if (DEBUG) printf ("Pre-execution: %i (%i)\n", current_node->node->seq_no, current_node->node->in_edges);
+            if (current_node->node->in_edges == 0) {
                 child = fork();
                 if (child == 0) { // child
                     if (DEBUG) printf ("Executing command %i... ", current_node->node->seq_no);
@@ -328,7 +320,6 @@ command_t execute_parallel (graph_nodes *node_list, int time_travel) {
                     if (DEBUG) printf ("complete [%i]\n", current_node->node->command->status);
                     exit(current_node->node->command->status);
                 } else if (child > 0) { // parent
-                    current_node->node->executing = 1;
                     // append new child process to children
                     child_node *new_child = (child_node *) malloc (sizeof (child_node *));
                     new_child->node = current_node->node;
@@ -341,10 +332,28 @@ command_t execute_parallel (graph_nodes *node_list, int time_travel) {
                     
                     if (!children)
                         children = last_child;
+                    
+                    // Prune from node_list
+                    if (DEBUG) printf ("Pruning %i from node list; ", current_node->node->seq_no);
+                    graph_nodes *executing_node = current_node;
+                    if (current_node == node_list) { // special case for if the completed node is first in nodelist
+                        if (DEBUG) printf ("moving node_list forward\n");
+                        node_list = node_list->next;
+                        if (node_list)
+                            node_list->prev = NULL;
+                        current_node = node_list;
+                    } else if (current_node->prev) {
+                        if (DEBUG) printf ("excising element\n");
+                        current_node->prev->next = current_node->next;
+                        current_node->next->prev = current_node->prev;
+                        current_node = current_node->next;
+                    }
+                    free (executing_node);
                 } else
                     error (1, 0, "execute_parallel: failed to create child process!");
+            } else {
+                current_node = current_node->next;
             }
-            current_node = current_node->next;
         }
         
         if (DEBUG) printf ("Traversed! ");
@@ -356,32 +365,15 @@ command_t execute_parallel (graph_nodes *node_list, int time_travel) {
         child_node *completed_child = children;
         int complete = children->node->seq_no;
         
-        
-        
         // Parent: prune completed child nodes from nodelist; decrement in_edges
         children = children->next;
-        current_node = node_list;
-        if (node_list->node->seq_no == complete) { // special case for if the completed node is first in nodelist
-            node_list = node_list->next;
-            decrement (current_node->node);
-            free (current_node->node);
-            free (current_node);
-        } else if (current_node) {
-            while (current_node->next) {
-                if (current_node->next->node->seq_no == complete) {
-                    graph_nodes *nodes_done = current_node->next;
-                    current_node->next = nodes_done->next;
-                    decrement (nodes_done->node);
-                    free (nodes_done->node);
-                    free (nodes_done);
-                }
-            }
-        }
+        decrement (completed_child->node);
         if (!children)
             last_child = NULL;
         
-        if (DEBUG) printf ("Pruned %i from node list\n", complete);
-        free(completed_child);
+        last_command = completed_child->node->command;
+        free (completed_child->node);
+        free (completed_child);
         current_node = node_list;
         // TODO: (recursive) Find disconnected graphs, and execute separately
     }
@@ -398,3 +390,36 @@ void decrement (graph_node *node) {
         *out++;
     }
 }
+
+
+graph_nodes *append_command (graph_nodes *last_node, command_t command, int *command_number) {
+    // Split up top level subshell/sequence commands
+    while (command->type == SUBSHELL_COMMAND || command->type == SEQUENCE_COMMAND) {
+        if (command->type == SUBSHELL_COMMAND) {
+            command_t parent = command;
+            command = command->u.subshell_command;
+            free (parent);
+        } else if (command->type == SEQUENCE_COMMAND) {
+            last_node = append_command (last_node, command->u.command[0], command_number);
+            last_node = append_command (last_node, command->u.command[1], command_number);
+            free (command);
+            return last_node;
+        }
+    }
+    // Parse and add to last_node
+    if (DEBUG) {
+        printf ("# %d\n", *command_number);
+        print_command (command);
+    }
+    
+    graph_node *n = parse_io (command, (*command_number)++);
+    if (last_node->node) {
+        last_node->next = (graph_nodes *) checked_malloc (sizeof (graph_nodes));
+        last_node->next->prev = last_node;
+        last_node = last_node->next;
+    }
+    last_node->node = n;
+    last_node->next = NULL;
+    return last_node;
+}
+
