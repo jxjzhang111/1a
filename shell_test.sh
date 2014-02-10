@@ -6,4 +6,5 @@
 #echo fooing && foo
 #foo && echo shouldnotrun
 #sort < test.txt
-(sleep 4; sleep 4; sleep 4)
+sleep 1 && (echo hi > test)
+sleep 1 && (echo hello > test)

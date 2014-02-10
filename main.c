@@ -133,7 +133,8 @@ main (int argc, char **argv)
         while (last_node) {
             while (prev_node->node->seq_no < last_node->node->seq_no) {
                 if (intersect (last_node->node->outputs, prev_node->node->inputs)
-                    || intersect (last_node->node->inputs, prev_node->node->outputs)) {
+                    || intersect (last_node->node->inputs, prev_node->node->outputs)
+                    || intersect (last_node->node->outputs, prev_node->node->outputs)) { // Avoid interleaving output files
                     add_edge (prev_node->node, last_node->node);
                 }
                 prev_node = prev_node->next;
@@ -393,13 +394,9 @@ void decrement (graph_node *node) {
 
 
 graph_nodes *append_command (graph_nodes *last_node, command_t command, int *command_number) {
-    // Split up top level subshell/sequence commands
-    while (command->type == SUBSHELL_COMMAND || command->type == SEQUENCE_COMMAND) {
-        if (command->type == SUBSHELL_COMMAND) {
-            command_t parent = command;
-            command = command->u.subshell_command;
-            free (parent);
-        } else if (command->type == SEQUENCE_COMMAND) {
+    // Split up top level sequence commands
+    while (command->type == SEQUENCE_COMMAND) {
+        if (command->type == SEQUENCE_COMMAND) {
             last_node = append_command (last_node, command->u.command[0], command_number);
             last_node = append_command (last_node, command->u.command[1], command_number);
             free (command);

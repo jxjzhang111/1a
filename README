@@ -4,3 +4,5 @@ Jennifer Zhang (504356174) and Yi-An Lai (304271741)
 
 Semicolons interspersed in the input .sh file are always interpreted as SEQUENCE_COMMANDS.
 A semicolon after a complete command at the end of the file is ignored (interpreted as end of command).
+
+Subshell parallelization is not implemented. Only top level sequence commands are parallelized. All code for 1c is in main.c
