@@ -115,6 +115,9 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
                     free (temp);
                 }
                 current_ts = NULL;
+            } else if (last_t && !last_t->is_operator && paren > 0) { // Interpret newline as semicolon if inside subshell
+                c = ';';
+                goto operator;
             } else if (last_t && last_t->is_operator && last_t->type == SIMPLE_COMMAND)
                 error (1, 0, "%i: Newline after redirect %s is not permitted\n", t->line, last_t->word);
         } else if (in_comment || whitespace_char (c)) {
@@ -151,6 +154,7 @@ command_stream_t make_command_stream (int (*get_next_byte) (void *), void *get_n
             
         } else if (operator_char (c)) {
             // parse operator
+        operator:
             if (DEBUG) printf("Operator %c\n", c);
             enum command_type type;
             char *word = (char *) checked_malloc (sizeof (char) * 1);

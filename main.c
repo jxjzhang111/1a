@@ -200,16 +200,19 @@ char **extract_io (command_t command, char io) {
             if (command->input) {
                 words[word_count] = command->input;
                 word_count++;
+                words[word_count] = 0;
             }
             
             char **w = command->u.word;
-            while (*++w && *w[0] != '-' && !contains(*w, words)) {
+            while (*w && *w[0] != '-' && !contains(*w, words)) {
                 words[word_count] = *w;
                 word_count++;
                 if (word_count == max_word_count) {
                     words = checked_grow_alloc (words, &max_size);
                     max_word_count = max_size / (sizeof (char *));
                 }
+                words[word_count] = 0;
+                *++w;
             }
         }
     } else if (command->type == SUBSHELL_COMMAND) { // Note: not supporting redirects after subshells
@@ -218,6 +221,8 @@ char **extract_io (command_t command, char io) {
         words1 = extract_io (command->u.command[0], io);
         words2 = extract_io (command->u.command[1], io);
     }
+    
+    words[word_count] = 0;
     
     // append words1/2 to words while skipping repeats
     char **w;
@@ -231,6 +236,7 @@ char **extract_io (command_t command, char io) {
                     words = checked_grow_alloc (words, &max_size);
                     max_word_count = max_size / (sizeof (char *));
                 }
+                words[word_count] = 0;
             }
             *w++;
         }
@@ -249,6 +255,7 @@ char **extract_io (command_t command, char io) {
                     words = checked_grow_alloc (words, &max_size);
                     max_word_count = max_size / (sizeof (char *));
                 }
+                words[word_count] = 0;
             }
             *w++;
         }
