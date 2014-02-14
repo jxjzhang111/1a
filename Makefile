@@ -1,11 +1,11 @@
 # CS 111 Lab 1 Makefile
 
 CC = gcc
-CFLAGS = -g -Wall -Wextra -Wno-unused -Werror
+CFLAGS = -g -Wall -Wextra -Wno-unused -Werror -I.
 LAB = 1
 DISTDIR = lab1-$(USER)
 
-all: timetrash
+all: timetrash worm
 
 TESTS = $(wildcard test*.sh)
 TEST_BASES = $(subst .sh,,$(TESTS))
@@ -15,7 +15,8 @@ TIMETRASH_SOURCES = \
   execute-command.c \
   main.c \
   read-command.c \
-  print-command.c
+  print-command.c \
+  strmap.c
 TIMETRASH_OBJECTS = $(subst .c,.o,$(TIMETRASH_SOURCES))
 
 DIST_SOURCES = \
@@ -28,6 +29,9 @@ timetrash: $(TIMETRASH_OBJECTS)
 alloc.o: alloc.h
 execute-command.o main.o print-command.o read-command.o: command.h
 execute-command.o print-command.o read-command.o: command-internals.h
+
+worm: worm.c
+	$(CC) $(CFLAGS) -o worm worm.c
 
 dist: $(DISTDIR).tar.gz
 
@@ -43,6 +47,6 @@ $(TEST_BASES): timetrash
 	./$@.sh
 
 clean:
-	rm -fr *.o *~ *.bak *.tar.gz core *.core *.tmp timetrash $(DISTDIR)
+	rm -fr *.o *~ *.bak *.tar.gz core *.core *.tmp timetrash worm $(DISTDIR)
 
 .PHONY: all dist check $(TEST_BASES) clean
