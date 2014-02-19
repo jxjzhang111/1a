@@ -20,8 +20,7 @@ TIMETRASH_SOURCES = \
 TIMETRASH_OBJECTS = $(subst .c,.o,$(TIMETRASH_SOURCES))
 
 DIST_SOURCES = \
-  $(TIMETRASH_SOURCES) alloc.h command.h command-internals.h Makefile \
-  $(TESTS) check-dist README
+  $(TIMETRASH_SOURCES) alloc.h command.h command-internals.h strmap.h worm.c process-overload.sh README Makefile 
 
 timetrash: $(TIMETRASH_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(TIMETRASH_OBJECTS)
