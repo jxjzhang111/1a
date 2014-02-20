@@ -22,7 +22,7 @@
 #define WORDMIN 2
 #define MAX_PROC_COUNT 1000
 #define HASHTABLE_SIZE 200
-#define SCAN_INTERVAL 50000 // us
+#define SCAN_INTERVAL 100000 // us
 
 static char const *program_name;
 static char const *script_name;

@@ -11,13 +11,13 @@ int main(int argc, char** argv) {
 
     switch(type) {
         case 1:
-            printf("Type 1 worm. Deadly.\n");
+            printf("Type I. Deadly.\n");
             // deadliest type, exponetial growth
             while(1)
                 fork();
 
-        default:
-            printf("Type 0 worm.\n");
+        case 2:
+            printf("Type II.\n");
             // only the parent keeps spawning children
             for(;;) {
                 pid = fork();
@@ -27,12 +27,13 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+
+        default:
+            printf("Type III.\n");
+            // 70% chance of forking a child
+            while(rand() % 100 < 70)
+                fork();
     } 
 
 	return 0;
 }
-
-
-// exponential growth
-
-// single parent growth
